@@ -73,37 +73,27 @@ function getPlayerLaneAndClickDamage(player_id, callback){
     });
 }
 
-function takeFromMonsterHP(num_clicks, player_id)
+function takeFromMonsterHP(number_clicks, player_id)
 {
-    var lane = getPlayerLaneAndClickDamage(player_id, function(lane, dmg){
-    switch(lane) {
-        case 0:
-            first_enemy_hp = first_enemy_hp - (num_clicks*dmg);
-            if(first_enemy_hp <= 0) {
-                increasePlayerGold(5000, 12345678);
-            }
-            break;
-        case 1:
-            second_enemy_hp = second_enemy_hp - (num_clicks*dmg);
-            if(second_enemy_hp <= 0) {
-                increasePlayerGold(5000, 12345678);
-            }
-            break;
-        case 2:
-            third_enemy_hp = third_enemy_hp - (num_clicks*dmg);
-            if(third_enemy_hp <= 0) {
-                increasePlayerGold(5000, 12345678);
-            }
-            break;
-        default:
-            console.log("hax player not in a lane" + lane);
+        var num_clicks = 0;
+        if(number_clicks >= 20) {
+            num_clicks = 20;
+        } else {
+            num_clicks = number_clicks;
         }
-    });
+        db.get("SELECT target, current_lane, damage_per_click FROM player WHERE player_id = "+player_id, function(err, row){
+                db.each("SELECT hp, id FROM monsters WHERE lane = "+row.current_lane+" AND target = "+row.target, function(err, rows){
+                    console.log(err);
+                    if(rows.hp>0){
+                        var new_hp = rows.hp - (num_clicks*row.damage_per_click);
+                        db.run("UPDATE monsters SET hp = "+new_hp+" WHERE id = "+rows.id)
+                    }
+                });
+        });
 }
 
 function purchaseUpgradePlayer(upgrade_arr, player_id, callback){
-    db.each("SELECT * FROM tech WHERE player_id = "+player_id+" AND tech_id = "+upgrade_arr, function(err, row){
-        console.log(row);
+    db.get("SELECT * FROM tech WHERE player_id = "+player_id+" AND tech_id = "+upgrade_arr, function(err, row){
         getPlayerGold(player_id, function(gold_amount){
             if(gold_amount >= row.cost_for_next_level)
             {
@@ -261,12 +251,12 @@ function updatePlayerUpgradesToStats(player_id, callback){
             db.run('UPDATE player SET max_hp = '+hp+' WHERE id = '+player_id,function(err){
                 db.run('UPDATE player SET damage_per_click = '+click_damage+' WHERE id = '+player_id, function(err){
                     db.run('UPDATE player SET dps = '+dps+' WHERE id = '+player_id, function(err){
-                        console.log()
-                        callback();
                     });
                 });
             });
         });
+    }, function() {
+        callback();
     });
 }
 
@@ -306,7 +296,7 @@ function changePlayerLane(lane, player_id){
 }
 
 function updatePlayerTarget(target, player_id){
-    db.run('UPDATE player SET player.target = '+target+' WHERE player_id = '+player_id);
+    db.run('UPDATE player SET target = '+target+' WHERE player_id = '+player_id);
 }
 
 function updatePlayerStat(stat, value, player_id){
@@ -326,29 +316,202 @@ function createGetPlayerNames(callback) {
     callback(encmsg);
 }
 
-var first_enemy_hp = 1000;
-var second_enemy_hp = 1000;
-var third_enemy_hp = 1000;
+function generateMonstersRound(level, callback) {
+    // is level a multiple of 10 - if so it's a boss round
+    if(((level+1)%10)==0){
+        // Boss round!!!  Hope it's a multiple of 100, GOLD HEEEELM!  HONK!
+        // Boss round we spawn 1 boss in a room at random and then the other 2 rooms
+        //  each get 3 minibosses.  The client chooses what boss is shown so we can't
+        //  give them goldhelm every round :[
+        // We'll get the bosses lane by using Math.random():
+        var boss_lane = Math.round(Math.random()*2);
+        db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*10000)+","+(level*10000)+","+(level*25)+","+(level*500)+","+boss_lane+",2,0);", function(err){
+            if(err){
+                console.log(err);
+            }
+            // Fancy maths tricks to get the other two lanes..
+            // Math.sqrt((boss_lane-2)*(boss_lane-2)) - gives us the first non-boss lane
+            // Math.sqrt((boss_lane-1)*(boss_lane-1)) - gies us the second non-boss lane
+            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*100)+","+Math.sqrt((boss_lane-2)*(boss_lane-2))+",3,0);", function(err){
+                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*100)+","+Math.sqrt((boss_lane-2)*(boss_lane-2))+",3,1);", function(err){
+                    db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*100)+","+Math.sqrt((boss_lane-2)*(boss_lane-2))+",3,2);", function(err){
+                        db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*100)+","+Math.sqrt((boss_lane-1)*(boss_lane-1))+",3,0);", function(err){
+                            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*100)+","+Math.sqrt((boss_lane-1)*(boss_lane-1))+",3,1);", function(err){
+                                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*100)+","+Math.sqrt((boss_lane-1)*(boss_lane-1))+",3,2);", function(err){
+                                    callback();
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        })
+    } else {
+        // Random chance it's a treasure round, I'll say... 3% chance...
+        var ran_chance = Math.round(Math.random()*100);
+        if(ran_chance == 1 || ran_chance == 10 || ran_chance == 30) {
+            // Treasure Round!!!! 3*Type 4 monsters in every lane!  Make them drop a ton of gold!
+            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",1,4,0);", function(err){
+                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",1,4,1);", function(err){
+                    db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",1,4,2);", function(err){
+                        db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",2,4,0);", function(err){
+                            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",2,4,1);", function(err){
+                                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",2,4,2);", function(err){
+                                    db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",1,4,0);", function(err){
+                                        db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",1,4,1);", function(err){
+                                             db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+(level*100)+","+(level*100)+","+(level*10)+","+(level*500)+",1,4,2);", function(err){
+                                                callback();
+                                            });
+                                        });
+                                    }); 
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        } else {
+            // Normal round with spawners and mobs..
+            var spawner_hp  = level*100;
+            var mob_hp      = level*50;
+            var spawner_dps = level*15;
+            var mob_dps     = level*5;
+            var spawner_gold= level*100;
+            var mob_gold    = level*25;
+            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+spawner_hp+","+spawner_hp+","+spawner_dps+","+spawner_gold+",0,0,0);", function(err){
+                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",0,1,1);", function(err){
+                    db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",0,1,2);", function(err){
+                        db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",0,1,3);", function(err){
+                            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+spawner_hp+","+spawner_hp+","+spawner_dps+","+spawner_gold+",1,0,0);", function(err){
+                                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",1,1,1);", function(err){
+                                    db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",1,1,2);", function(err){
+                                        db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",1,1,3);", function(err){
+                                            db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+spawner_hp+","+spawner_hp+","+spawner_dps+","+spawner_gold+",2,0,0);", function(err){
+                                                db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",2,1,1);", function(err){
+                                                     db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",2,1,2);", function(err){
+                                                         db.run("INSERT INTO monsters (level, hp, max_hp, dps, gold, lane, type, target) VALUES ("+level+", "+mob_hp+","+mob_hp+","+mob_dps+","+mob_gold+",2,1,3);", function(err){
+                                                            callback();
+                                                        });
+                                                    });
+                                                });
+                                            }); 
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        }
+    }
+}
 
 function createGameData (callback) {
-    var game_data = {'game_data': {level: 1, lanes: {}, timestamp: 0, status: 2, events: [], timestamp_game_start: 0, timestamp_level_start: 0, universe_state: null}};
-    var lanes = {enemies: [{id: 101749, type:2, hp: 1000, max_hp: 1000, dps: 10, gold: 5000} ], dps: 0, gold_dropped: null, active_player_abilities: [], player_hp_buckets: [0,0,0,0,0,0,0,0,0,1], element: 4, active_player_ability_decrease_cooldowns: 0, active_player_ability_gold_per_click: 0};
-    var lanes2 = {enemies: [{id: 101750, type:2, hp: 1000, max_hp: 1000, dps: 10, gold: 5000} ], dps: 0, gold_dropped: null, active_player_abilities: [], player_hp_buckets: [0,0,0,0,0,0,0,0,0,1], element: 4, active_player_ability_decrease_cooldowns: 0, active_player_ability_gold_per_click: 0};
-    var lanes3 = {enemies: [{id: 101751, type:2, hp: 1000, max_hp: 1000, dps: 10, gold: 5000} ], dps: 0, gold_dropped: null, active_player_abilities: [], player_hp_buckets: [0,0,0,0,0,0,0,0,0,1], element: 4, active_player_ability_decrease_cooldowns: 0, active_player_ability_gold_per_click: 0};
-    lanes.enemies[0].hp = first_enemy_hp;
-    lanes2.enemies[0].hp = second_enemy_hp;
-    lanes3.enemies[0].hp = third_enemy_hp;
-    game_data.game_data.lanes = [lanes, lanes2, lanes3];
-    game_data.game_data.timestamp = Math.round(+new Date()/1000);
-    game_data.game_data.timestamp_game_start = Math.round(+new Date()/1000)-10;
-    game_data.game_data.timestamp_level_start = Math.round(+new Date()/1000)-10;
-    game_data.stats = null;
-    var encmsg = m_protobuf_GetGameDataResponse.encode(game_data);
-    callback(encmsg);
+    MonsterTick(function(){ // THIS NEEDS TO GET OUF OF THIS FUNCITON LATER, LOLHAX - I NEED TO MAKE A SEPERATE FILE THAT DOES ALL THE BACKGROUND PROCESSING LATER BU FOR NOW THIS IS GOING IN HERE PLEASE REMOVE ME LATER DEAR LORD
+        MonsterDeathTick(function(){
+            LaneTick(function(){
+            db.get("SELECT * FROM game WHERE id = 1", function(err, game_row){
+                db.get("SELECT * FROM level WHERE game_id = 1 AND level = "+game_row.level, function(err, level_row){
+                    var game_data = {'game_data': {level: 3, lanes: {}, timestamp: 0, status: 2, events: [], timestamp_game_start: 0, timestamp_level_start: 0, universe_state: null}};
+                    game_data.game_data.level = game_row.level;
+                    game_data.game_data['status'] = game_row.status;
+                    game_data.game_data.timestamp_game_start = game_row.timestamp;
+                    game_data.game_data.timestamp_level_start = level_row.timestamp;
+                    var lanes = [];
+                    lanes[0] = {enemies: [], dps: 0, gold_dropped: null, active_player_abilities: [], player_hp_buckets: [0,0,0,0,0,0,0,0,0,1], element: 4, active_player_ability_decrease_cooldowns: 0, active_player_ability_gold_per_click: 0};
+                    lanes[1] = {enemies: [], dps: 0, gold_dropped: null, active_player_abilities: [], player_hp_buckets: [0,0,0,0,0,0,0,0,0,1], element: 4, active_player_ability_decrease_cooldowns: 0, active_player_ability_gold_per_click: 0};
+                    lanes[2] = {enemies: [], dps: 0, gold_dropped: null, active_player_abilities: [], player_hp_buckets: [0,0,0,0,0,0,0,0,0,1], element: 4, active_player_ability_decrease_cooldowns: 0, active_player_ability_gold_per_click: 0};
+                    var j = 0;
+                    db.each("SELECT * FROM monsters", function(err, row){
+                        lanes[row.lane].enemies.push({id:0,type:0,hp:0,max_hp:0,dps:0,gold:0});
+                        lanes[row.lane].enemies[lanes[row.lane].enemies.length-1]['id'] = row.id;
+                        lanes[row.lane].enemies[lanes[row.lane].enemies.length-1].hp = row.hp;
+                        lanes[row.lane].enemies[lanes[row.lane].enemies.length-1].max_hp = row.max_hp;
+                        lanes[row.lane].enemies[lanes[row.lane].enemies.length-1].dps = row.dps;
+                        lanes[row.lane].enemies[lanes[row.lane].enemies.length-1].gold = row.gold;
+                        lanes[row.lane].enemies[lanes[row.lane].enemies.length-1]['type'] = row['type'];
+                        j=j+1;
+                    }, function(err){
+                                game_data.game_data.lanes = lanes;
+                                game_data.game_data.timestamp = Math.round(+new Date()/1000);
+                                game_data.stats = null;
+                                var encmsg = m_protobuf_GetGameDataResponse.encode(game_data);
+                                callback(encmsg);
+                    });
+                });
+            });
+        });
+    });
+});
+}
+
+function LaneTick(callback){
+        db.all("SELECT * FROM monsters", function(errs, rows){
+        if(rows.length == 0)
+        {
+            // all monsters are dead
+            db.get("SELECT * FROM game WHERE id = 1", function(err, row){
+                db.run("UPDATE level SET complete = 1 WHERE level = "+row.level,function(err){
+                    db.run("UPDATE game SET level="+(row.level+1)+" WHERE id=1", function(err){
+                        db.run("INSERT INTO level (game_id, timestamp, level, complete) VALUES ("+row.id+", "+Math.round(+new Date()/1000)+", "+(row.level+1)+", 0);", function(err){
+                            generateMonstersRound(row.level+1, function(){
+                                callback();
+                            });
+                        });
+                    });
+                });
+            });
+        } else {
+            callback();
+        }
+    });
+}
+function MonsterDeathTick(callback) {
+    db.each("SELECT * FROM monsters", function(err, row){
+        if(row.hp <= 0){
+            // Monster is dead
+            // Remove monster from db and gift all players in lane that gold..
+            db.each("SELECT gold, id FROM player WHERE current_lane = "+row.lane, function(err_player, row_player){
+                // Check in here whether all monsters from all lanes are dead...
+                db.run("UPDATE player SET gold = "+(row_player.gold+row.gold)+" WHERE id="+row_player.id, function(err){});
+            }, function(err){
+                // end of loop
+                // delete monster from list now..
+                db.run("DELETE FROM monsters WHERE id = "+row.id, function(err){
+                });
+            });
+        }
+    }, function(err){
+        callback();
+    });
+}
+function MonsterTick(callback) {
+    // This function should do the secondly tick on monster HP.
+    // Should remove DPS of all players in lane off monster
+
+    // Dirty hack approaching:
+    //  I currently have this being run by the GameData request from the client which comes every 7 seconds.
+    //  When we have more than 1 player, this needs to become a separate running js thread, and probably run every 1 second.
+    db.each("SELECT * FROM monsters", function(err, row){
+        // Get all player DPS in lane that have their target set as this monster..
+        var dps = 0;
+        db.each("SELECT dps, target FROM player WHERE current_lane = "+row.lane+" AND target = "+row.target, function(monster_err, monster_row){
+            dps=dps+monster_row.dps;
+            if(dps>0){
+                // this dps*7 needs to updated to just dps without the 7 multiplier when we put this function as a separate instance
+                db.run("UPDATE monsters SET hp = "+(row.hp-(dps*7))+" WHERE id="+row.id,function(err){
+
+                });
+            }
+        });
+    }, function(err){
+        callback();
+    });
 }
 
 //For all your static (js/css/images/etc.) set the directory name (relative path).
-app.use(express.static('public'));
+app.use(express.static(__dirname + '/public'));
 
 //A sample GET request    
 app.get("/ITowerAttackMiniGameService/GetPlayerData/v0001/", function(req, res) {
@@ -419,31 +582,31 @@ app.post("/ITowerAttackMiniGameService/UseAbilities/v0001/", function(req, res) 
                 break;
             case 15:
                 // cripple monster
-                getPlayerLaneAndClickDamage(12345678, function(curr_lane,click_damage){
-                switch(curr_lane) {
-                    case 0:
-                        first_enemy_hp = first_enemy_hp - (first_enemy_hp*0.05*Math.random());
-                        if(first_enemy_hp <= 0) {
-                            gold = gold + 5000;
-                        }
-                        break;
-                    case 1:
-                        second_enemy_hp = second_enemy_hp - (first_enemy_hp*0.05*Math.random());
-                                                if(first_enemy_hp <= 0) {
-                            gold = gold + 5000;
-                        }
-                        break;
-                    case 2:
-                        third_enemy_hp = third_enemy_hp - (first_enemy_hp*0.05*Math.random());
-                        console.log((first_enemy_hp*0.05*Math.random()));
-                                                if(first_enemy_hp <= 0) {
-                            gold = gold + 5000;
-                        }
-                        break;
-                    default:
-                        console.log("hax player not in a lane");
-                    }
-                });
+                break;
+            case 13:
+                // resurection
+                break;
+            case 14:
+                // criple spawner
+                break;
+            case 16:
+                // max elemental damage
+                break;
+            case 17:
+                // raining gold
+                break;
+            case 18:
+                // crit
+                break;
+            case 19:
+                // pumped up
+                break;
+            case 20:
+                // throw money at target
+                break;
+            case 21:
+                // god mode
+                break;
             default:
                 console.log("Ability Use Attempted.");
                 console.log(ability_arr[i]);
@@ -457,9 +620,12 @@ app.post("/ITowerAttackMiniGameService/UseAbilities/v0001/", function(req, res) 
     });
 });
 
-
+function ticker() {
+    
+}
 
 //Create a server
+//generateMonstersRound(1, function(){    });
 var server = app.listen(80, function() {
       var host = server.address().address;
   var port = server.address().port;
